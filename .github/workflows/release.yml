@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux:
+    name: Release Linux
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cargo \
+            curl \
+            glslang-tools \
+            libluajit-5.1-dev \
+            libsdl2-dev \
+            libvulkan-dev \
+            libzip-dev \
+            luajit \
+            pkg-config \
+            vim-common
+
+      - name: Build release package
+        env:
+          GAME_NAME: TupiGame
+          VERSION: ${{ github.ref_name }}
+          ARTIFACT_DIR: ${{ github.workspace }}/dist/release
+        run: make release-linux GAME_NAME="$GAME_NAME" VERSION="$VERSION" ARTIFACT_DIR="$ARTIFACT_DIR"
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/release/**/*.txt
+            dist/release/**/bundle/*
