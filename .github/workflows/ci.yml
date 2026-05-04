@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux Build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cargo \
+            curl \
+            glslang-tools \
+            libluajit-5.1-dev \
+            libsdl2-dev \
+            libvulkan-dev \
+            libzip-dev \
+            luajit \
+            pkg-config \
+            vim-common
+
+      - name: Build release artifacts
+        env:
+          GAME_NAME: TupiGame
+          CI_VERSION: ci-${{ github.run_number }}
+          CI_ARTIFACT_DIR: ${{ github.workspace }}/dist/ci
+        run: make ci-linux GAME_NAME="$GAME_NAME" CI_VERSION="$CI_VERSION" CI_ARTIFACT_DIR="$CI_ARTIFACT_DIR"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tupi-linux-artifacts
+          path: |
+            dist/ci/**/*.txt
+            dist/ci/**/bundle/*
+          if-no-files-found: error
