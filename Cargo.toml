@@ -11,6 +11,10 @@ crate-type = ["staticlib"]
 name = "tupi_pack"
 path = "src/bin/tupi_pack.rs"
 
+[[bin]]
+name = "tupi_bootstrapper"
+path = "src/bin/tupi_bootstrapper.rs"
+
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
 zip   = { version = "2", default-features = false, features = ["deflate"] }

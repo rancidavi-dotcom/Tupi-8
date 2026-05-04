@@ -112,7 +112,10 @@ static void tupi_chdir_to_exe_dir(const char *exe_path) {
     slash = strrchr(dir, '/');
     if (!slash) return;
     *slash = '\0';
-    if (dir[0] != '\0') (void)chdir(dir);
+    if (dir[0] != '\0' && chdir(dir) != 0) {
+        fprintf(stderr, "Aviso: nao foi possivel entrar no diretorio do executavel '%s': %s\n",
+                dir, strerror(errno));
+    }
 }
 
 /* -------------------------------------------------------------------------

@@ -118,6 +118,8 @@ WIN_LIBS = -L$(RUST_LIB_PATH)/x86_64-pc-windows-gnu \
 LOADER_SRC     = main_bytecode_loader.c
 DIST_BIN_LINUX = tupi_engine
 PACKER_BIN     = ./target/release/tupi_pack
+BOOTSTRAPPER_BIN = ./target/release/tupi_bootstrapper
+BUNDLE_ENGINE_BIN = ./.build/$(DIST_BIN_LINUX)
 COLLECT_DEPS_BIN = ./scripts/collect_linux_deps.sh
 LUA_MODULE_SRCS = $(sort $(wildcard src/Engine/*.lua))
 ENGINE_ICON_SRC ?= logo.png
@@ -201,7 +203,7 @@ WIN_CROSS_DEPS_DNF = mingw64-gcc
 WIN_CROSS_DEPS_PACMAN = mingw-w64-gcc
 WIN_CROSS_DEPS_ZYPPER = cross-x86_64-w64-mingw32-gcc
 
-.PHONY: all menu sdl2 win bundle-linux package-release-linux ci-linux release-linux rodar compilar_rust compilar_rust_win compilar_packer shaders \
+.PHONY: all menu sdl2 win bundle-linux package-release-linux ci-linux release-linux rodar compilar_rust compilar_rust_win compilar_packer compilar_bootstrapper compilar_bundle_tools shaders \
         limpar instalar-deps-linux instalar-deps-win ajuda \
         _build_sdl2 _build_win _clean _deps_linux _deps_win
 
@@ -217,7 +219,7 @@ menu:
 	@printf "$(BOLD)  Selecione uma opcao:$(RESET)\n\n"
 	@printf "  $(GREEN)$(BOLD)[1]$(RESET) Compilar Linux      $(DIM)(libtupi.so - SDL2)$(RESET)\n"
 	@printf "  $(CYAN)$(BOLD)[2]$(RESET) Compilar Windows    $(DIM)(libtupi.dll - SDL2 cross-compile)$(RESET)\n"
-	@printf "  $(YELLOW)$(BOLD)[3]$(RESET) Bundle Linux      $(DIM)(UM executavel: ZIP-append, como Godot/Love2d)$(RESET)\n"
+	@printf "  $(YELLOW)$(BOLD)[3]$(RESET) Bundle Linux      $(DIM)(UM executavel: bootstrapper + engine + libs)$(RESET)\n"
 	@printf "  $(RED)$(BOLD)[4]$(RESET) Limpar artefatos\n"
 	@printf "  $(YELLOW)$(BOLD)[5]$(RESET) Dependencias Linux\n"
 	@printf "  $(YELLOW)$(BOLD)[6]$(RESET) Dependencias Windows\n"
@@ -292,12 +294,13 @@ $(OBJ_DIR_WIN)/src/Renderizador/Renderer.o: $(SHADERS_EMBED)
 # - bibliotecas .so necessárias
 # - assets do projeto
 # - assets obrigatórios da engine
+# - bootstrapper sem dependência de libzip no startup
 #
 # Uso:
 #   make bundle-linux GAME_NAME=MeuJogo OUTDIR=~/Desktop
 # ---------------------------------------------------------------------------
-bundle-linux: compilar_rust compilar_packer shaders $(DIST_OBJS) main.lua $(LUA_MODULE_SRCS)
-	@printf "\n$(CYAN)$(BOLD)  [Bundle] Gerando executavel unico (ZIP-append)...$(RESET)\n"
+bundle-linux: compilar_rust compilar_bundle_tools shaders $(DIST_OBJS) main.lua $(LUA_MODULE_SRCS)
+	@printf "\n$(CYAN)$(BOLD)  [Bundle] Gerando executavel unico (bootstrapper + engine)...$(RESET)\n"
 	@mkdir -p "$(OUTDIR)" .build/bundle_libs
 	@for req in $(ENGINE_REQUIRED_ASSETS); do \
 		if [ ! -f "$$req" ]; then \
@@ -306,16 +309,16 @@ bundle-linux: compilar_rust compilar_packer shaders $(DIST_OBJS) main.lua $(LUA_
 		fi; \
 	done
 
-	@# --- 1. Linka o executável final (SDL2 linkado dinamicamente) ---
-	@printf "$(CYAN)>  Linkando executavel bundle...$(RESET)\n"
-	@$(CC) -o "$(OUTDIR)/$(GAME_NAME)" $(DIST_OBJS) $(DIST_LIBS) \
-		&& printf "$(GREEN)+  Link OK.$(RESET)\n" \
-		|| { printf "$(RED)x  Falha no link bundle.$(RESET)\n\n"; exit 1; }
+	@# --- 1. Linka o engine real (será embutido dentro do bootstrapper) ---
+	@printf "$(CYAN)>  Linkando engine do bundle...$(RESET)\n"
+	@$(CC) -o "$(BUNDLE_ENGINE_BIN)" $(DIST_OBJS) $(DIST_LIBS) \
+		&& printf "$(GREEN)+  Engine OK.$(RESET)\n" \
+		|| { printf "$(RED)x  Falha no link do engine bundle.$(RESET)\n\n"; exit 1; }
 
-	@# --- 2. Coleta as .so que o executável precisa ---
+	@# --- 2. Coleta as .so que o engine embutido precisa ---
 	@printf "$(CYAN)>  Coletando bibliotecas dinamicas...$(RESET)\n"
 	@rm -rf .build/bundle_libs && mkdir -p .build/bundle_libs
-	@$(COLLECT_DEPS_BIN) "$(OUTDIR)/$(GAME_NAME)" .build/bundle_libs
+	@bash "$(COLLECT_DEPS_BIN)" "$(BUNDLE_ENGINE_BIN)" .build/bundle_libs
 	@printf "$(GREEN)+  Libs coletadas.$(RESET)\n"
 
 	@# --- 3. Coleta assets (automático: todos os formatos, sem diretório temporário) ---
@@ -328,24 +331,23 @@ bundle-linux: compilar_rust compilar_packer shaders $(DIST_OBJS) main.lua $(LUA_
 		printf "$(YELLOW)!  Nenhum asset encontrado.$(RESET)\n"; \
 	fi
 
-	@# --- 4. Empacota: ELF + ZIP[ __main__, scripts/*, lib/*.so, assets/* ] ---
-	@# Assets passados com path relativo ao projeto → packer normaliza para assets/<rel>.
-	@# Resultado: assets/ascii.png, assets/tilesets/grama.png, etc.
-	@printf "$(CYAN)>  Empacotando scripts + libs + assets no executavel...$(RESET)\n"
+	@# --- 4. Empacota: bootstrapper + ZIP[ __engine__, __main__, scripts/*, lib/*, assets/* ] ---
+	@# Assets passados com path relativo ao projeto -> packer normaliza para assets/<rel>.
+	@printf "$(CYAN)>  Empacotando bootstrapper + engine + scripts + libs + assets...$(RESET)\n"
 	@LIB_COUNT=$$(find .build/bundle_libs -name '*.so*' -type f 2>/dev/null | wc -l); \
-	CMD="$(PACKER_BIN) append \"$(OUTDIR)/$(GAME_NAME)\" main.lua $(LUA_MODULE_SRCS)"; \
+	CMD="$(PACKER_BIN) bundle \"$(OUTDIR)/$(GAME_NAME)\" \"$(BOOTSTRAPPER_BIN)\" \"$(BUNDLE_ENGINE_BIN)\" main.lua $(LUA_MODULE_SRCS)"; \
 	[ "$$LIB_COUNT" -gt 0 ] && CMD="$$CMD --libs .build/bundle_libs"; \
 	CMD="$$CMD --assets assets/ascii.png $(ENGINE_ICON_SRC)=$(ENGINE_ICON_DEST)"; \
 	[ -n "$(OPTIONAL_ASSETS)" ] && CMD="$$CMD $(OPTIONAL_ASSETS)"; \
 	eval $$CMD \
-		&& printf "$(GREEN)+  ZIP anexado ao executavel OK.$(RESET)\n" \
-		|| { printf "$(RED)x  Falha ao anexar ZIP.$(RESET)\n\n"; exit 1; }
+		&& printf "$(GREEN)+  Bundle unico gerado OK.$(RESET)\n" \
+		|| { printf "$(RED)x  Falha ao gerar bundle unico.$(RESET)\n\n"; exit 1; }
 
 	@chmod +x "$(OUTDIR)/$(GAME_NAME)"
 	@printf "\n$(GREEN)$(BOLD)+  '$(GAME_NAME)' pronto em: $(OUTDIR)/$(GAME_NAME)$(RESET)\n"
 	@printf "$(DIM)   Arquivo unico — copie para onde quiser e execute.\n"
-	@printf "   Na primeira execucao extrai libs em /tmp/tupi_<hash>/ e reinicia.\n"
-	@printf "   Execucoes seguintes iniciam diretamente (tmpdir reutilizado).$(RESET)\n\n"
+	@printf "   Na execucao ele extrai engine/libs/assets em /tmp e reinicia internamente.\n"
+	@printf "   O bootstrapper nao depende de libzip no startup, melhorando a portabilidade.$(RESET)\n\n"
 
 ci-linux:
 	@$(MAKE) package-release-linux \
@@ -396,6 +398,14 @@ compilar_packer:
 	@cd $(RUST_DIR) && $(CARGO) build --release --bin tupi_pack \
 		&& printf "$(GREEN)+  Packer OK.$(RESET)\n" \
 		|| { printf "$(RED)x  Falha no build do packer.$(RESET)\n"; exit 1; }
+
+compilar_bootstrapper:
+	@printf "$(CYAN)>  Compilando bootstrapper...$(RESET)\n"
+	@cd $(RUST_DIR) && $(CARGO) build --release --bin tupi_bootstrapper \
+		&& printf "$(GREEN)+  Bootstrapper OK.$(RESET)\n" \
+		|| { printf "$(RED)x  Falha no build do bootstrapper.$(RESET)\n"; exit 1; }
+
+compilar_bundle_tools: compilar_packer compilar_bootstrapper
 
 compilar_rust_win:
 	@printf "$(CYAN)>  Compilando Rust (Windows target)...$(RESET)\n"
