@@ -15,6 +15,7 @@ ffi.cdef[[
    /* ── Janela ─────────────────────────────────────────────────────── */
    int    tupi_janela_criar(int largura, int altura, const char* titulo,
                             float escala, int sem_borda, const char* icone);
+   void   tupi_janela_aplicar_icone(const char* icone);
    void   tupi_janela_set_titulo(const char* titulo);
    void   tupi_janela_set_decoracao(int ativo);
    void   tupi_janela_tela_cheia(int ativo);
@@ -95,6 +96,8 @@ ffi.cdef[[
 
    TupiSprite* tupi_sprite_carregar(const char* caminho);
    void        tupi_sprite_destruir(TupiSprite* sprite);
+   void        tupi_sprite_pixel_snap(int ativo);
+   int         tupi_sprite_pixel_snap_ativo(void);
 
    TupiObjeto tupi_objeto_criar(
       float x, float y,
@@ -140,6 +143,8 @@ ffi.cdef[[
    void        tupi_camera_frame   (TupiCamera* cam, int largura, int altura);
    void        tupi_camera_ativar  (TupiCamera* cam);
    TupiCamera* tupi_camera_ativa   (void);
+   void        tupi_camera_pixel_snap(int ativo);
+   int         tupi_camera_pixel_snap_ativo(void);
 
    void  tupi_camera_pos     (TupiCamera* cam, float x, float y);
    void  tupi_camera_mover   (TupiCamera* cam, float dx, float dy);

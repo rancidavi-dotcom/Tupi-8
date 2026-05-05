@@ -4,6 +4,7 @@ local Visual = require("src.Engine.engine_visual")
 local Mundo  = require("src.Engine.engine_mundo")
 local KB     = require("src.Engine.tupi_teclado")
 local Norm   = require("src.Engine.texto_normalizar")
+local C = require("src.Engine.engineffi")
 
 local Tupi = {}
 
@@ -30,6 +31,10 @@ Spr._retRet     = function(a, b) return Col.retRet(a, b) end
 Spr._retRetInfo = function(a, b) return Col.retRetInfo(a, b) end
 Spr._aplicarCor = R._aplicarCor
 
+function Tupi.pixelSnap(ativo)
+    Spr.pixelPerfeito(ativo)  -- desliga snap no Lua E no C ao mesmo tempo
+end
+
 -- ─── JANELA ──────────────────────────────────────────────────────────────────
 
 function Tupi.janela(largura, altura, titulo, escala, semBorda, imagem)
@@ -53,6 +58,10 @@ function Tupi.telaCheia(a, lb)    J.telaCheia(a, lb)           end
 function Tupi.letterboxAtivo()    return J.letterboxAtivo()    end
 function Tupi.fpsLimite(n)        if Visual.fpsLimite then Visual.fpsLimite(n) end  end
 function Tupi.fpsAtual()          return Visual.fpsAtual and Visual.fpsAtual() or 0 end
+function Tupi.pixelPerfeito(ativo)
+    Spr.pixelPerfeito(ativo)
+    Visual.camera.pixelPerfeito(ativo)
+end
 
 -- ─── RENDER / FORMAS ─────────────────────────────────────────────────────────
 

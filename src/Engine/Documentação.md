@@ -31,7 +31,7 @@ Use estas funções para criar, controlar e fechar a janela do jogo.
 
 | Função | O que faz |
 |---|---|
-| `Tupi.janela(largura, altura, titulo, escala, semBorda, imagem)` | Cria a janela |
+| `Tupi.janela(largura, altura, titulo, escala, semBorda, imagem)` | Cria a janela e, se `imagem` for informada, tenta usar esse arquivo como ícone |
 | `Tupi.rodando()` | Retorna `true` enquanto o jogo estiver aberto |
 | `Tupi.limparTela()` | Limpa a tela |
 | `Tupi.atualizar()` | Atualiza a janela no fim do frame |
@@ -44,6 +44,7 @@ Use estas funções para criar, controlar e fechar a janela do jogo.
 | `Tupi.titulo(t)` | Troca o título da janela |
 | `Tupi.decoracao(a)` | Liga/desliga bordas da janela |
 | `Tupi.telaCheia(a, lb)` | Liga/desliga fullscreen |
+| `Tupi.pixelPerfeito(a)` | Liga/desliga pixel snapping de sprites e câmera |
 | `Tupi.letterboxAtivo()` | Informa se o letterbox está ativo |
 | `Tupi.fpsLimite(n)` | Define o limite de FPS |
 | `Tupi.fpsAtual()` | Retorna o FPS atual |
@@ -191,6 +192,8 @@ Tupi.escrever("Olá, mundo!", 8, 8, 10, 1, 1, Tupi.BRANCO)
 | `Tupi.resetCor()` | Limpa a cor aplicada |
 | `Tupi.destruir(obj, liberarSpr)` | Destrói objeto |
 | `Tupi.destruido(obj)` | Verifica se foi destruído |
+
+Use `Tupi.pixelPerfeito(false)` quando quiser movimento subpixel suave. O padrão da engine continua `true`, que deixa pixel art mais estável mas pode parecer "tremida" em velocidades fracionárias.
 
 ### Hitbox
 

@@ -16,12 +16,8 @@ function Janela.janela(largura, altura, titulo, escala, semBorda, imagem)
     if C.tupi_janela_criar(largura, altura, titulo, escala, semBorda, imagem) == 0 then
         error("[TupiEngine] Falha ao criar janela!")
     end
-    --- @diagnostic disable-next-line: undefined-global
-    if type(tupi_c_aplicar_icone) == "function" then
-        --- @diagnostic disable-next-line: undefined-global
-        local icon_path = type(TUPI_ICON_PATH) == "string" and TUPI_ICON_PATH or ".engine/icon.png"
-        --- @diagnostic disable-next-line: undefined-global
-        tupi_c_aplicar_icone(icon_path)
+    if type(C.tupi_janela_aplicar_icone) == "function" then
+        C.tupi_janela_aplicar_icone(".engine/icon.png")
     end
 end
 

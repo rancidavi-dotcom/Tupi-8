@@ -4,6 +4,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{Cursor, Read, Write};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -115,6 +116,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     eprintln!("[Bootstrap] Scripts em: {}", scripts_path.display());
 
     if found_libs {
+        create_soname_symlinks(&lib_dir)?;
         prepend_env_path("LD_LIBRARY_PATH", &lib_dir);
     }
 
@@ -204,6 +206,49 @@ fn write_scripts_zip(
     }
 
     zip.finish()?;
+    Ok(())
+}
+
+/// Para cada lib com nome real versionado (ex: libzip.so.4.0),
+/// cria um symlink soname (ex: libzip.so.4 -> libzip.so.4.0)
+/// caso ainda nao exista. Isso permite que o dynamic linker
+/// resolva dependencias que referenciam apenas o soname.
+fn create_soname_symlinks(lib_dir: &Path) -> Result<(), Box<dyn Error>> {
+    for entry in fs::read_dir(lib_dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+
+        // Procura pelo padrao ".so." no nome do arquivo
+        // Ex: "libzip.so.4.0", "libSDL2-2.0.so.0.3000.0"
+        let so_pos = match name.find(".so.") {
+            Some(p) => p,
+            None => continue,
+        };
+
+        // Extrai apenas o numero major apos ".so."
+        // Ex: "4.0" -> major = "4"
+        let after_so = &name[so_pos + 4..];
+        let major = match after_so.split('.').next() {
+            Some(m) if !m.is_empty() => m,
+            _ => continue,
+        };
+
+        // Se o nome ja e o soname (sem versao alem do major), nao precisa de symlink
+        if after_so == major {
+            continue;
+        }
+
+        // Monta o soname: "libzip.so.4"
+        let soname = format!("{}.so.{}", &name[..so_pos], major);
+        let symlink_path = lib_dir.join(&soname);
+
+        if !symlink_path.exists() {
+            symlink(entry.path().file_name().unwrap(), &symlink_path)?;
+            eprintln!("[Bootstrap] Symlink soname: {} -> {}", soname, name);
+        }
+    }
+
     Ok(())
 }
 

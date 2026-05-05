@@ -27,6 +27,7 @@ end
 local _espelhos      = {}
 local _quad_espelho  = ffi.new("float[16]")
 local _cor_sprite    = { r=1.0, g=1.0, b=1.0, a=1.0 }
+local _pixel_snap_ativo = true
 
 local function _chaveEspelho(w) return tostring(ffi.cast("void*", w.obj)) end
 
@@ -48,11 +49,18 @@ local function _enviarComEspelho(wrapper, camada)
     if e.h then u0, u1 = u1, u0 end -- espelho horizontal
     if e.v then v0, v1 = v1, v0 end -- espelho vertical
 
-    -- posição em pixel inteiro
-    local x0 = math.floor(tonumber(obj.x) + 0.5)
-    local y0 = math.floor(tonumber(obj.y) + 0.5)
-    local x1 = x0 + math.floor(cw * tonumber(obj.escala) + 0.5)
-    local y1 = y0 + math.floor(ch * tonumber(obj.escala) + 0.5)
+    local x0 = tonumber(obj.x)
+    local y0 = tonumber(obj.y)
+    local sw = cw * tonumber(obj.escala)
+    local sh = ch * tonumber(obj.escala)
+    if _pixel_snap_ativo then
+        x0 = math.floor(x0 + 0.5)
+        y0 = math.floor(y0 + 0.5)
+        sw = math.floor(sw + 0.5)
+        sh = math.floor(sh + 0.5)
+    end
+    local x1 = x0 + sw
+    local y1 = y0 + sh
 
     _quad_espelho[0]=x0; _quad_espelho[1]=y0; _quad_espelho[2]=u0; _quad_espelho[3]=v0
     _quad_espelho[4]=x1; _quad_espelho[5]=y0; _quad_espelho[6]=u1; _quad_espelho[7]=v0
@@ -73,6 +81,11 @@ function Sprite.setCor(r, g, b, a)
     _cor_sprite.b = b or 1.0; _cor_sprite.a = a or 1.0
 end
 function Sprite.resetCor() _cor_sprite.r=1;_cor_sprite.g=1;_cor_sprite.b=1;_cor_sprite.a=1 end
+
+function Sprite.pixelPerfeito(ativo)
+    _pixel_snap_ativo = ativo ~= false
+    C.tupi_sprite_pixel_snap(_pixel_snap_ativo and 1 or 0)
+end
 
 Sprite._enviarComEspelho = _enviarComEspelho
 Sprite._espelhos         = _espelhos
@@ -290,6 +303,10 @@ Camera.camera  = {}
 Camera.paralax = {}
 
 local Cam = Camera.camera
+
+function Camera.pixelPerfeito(ativo)
+    C.tupi_camera_pixel_snap(ativo ~= false and 1 or 0)
+end
 
 function Cam.criar(ax, ay, anc_x, anc_y)
     local ptr = ffi.new("TupiCamera[1]")
