@@ -1,5 +1,9 @@
 SHELL := /bin/bash
 
+PREFIX ?= /usr/local
+DESTDIR ?=
+INSTALL ?= install
+
 CC       = gcc
 CC_WIN   = x86_64-w64-mingw32-gcc
 LUAJIT   = luajit
@@ -115,16 +119,19 @@ WIN_LIBS = -L$(RUST_LIB_PATH)/x86_64-pc-windows-gnu \
            -l$(WIN_VULKAN_LIB) \
            -lm -static-libgcc
 
-LOADER_SRC     = main_bytecode_loader.c
+LOADER_SRC     = src/boot_elf/main_bytecode_loader.c
 DIST_BIN_LINUX = tupi_engine
+TUPI_BIN       = tupi
+SCRIPT_ARCHIVE_NAME = game.tuzip
 PACKER_BIN     = ./target/release/tupi_pack
 BOOTSTRAPPER_BIN = ./target/release/tupi_bootstrapper
 BUNDLE_ENGINE_BIN = ./.build/$(DIST_BIN_LINUX)
 COLLECT_DEPS_BIN = ./scripts/collect_linux_deps.sh
+WINDOW_ICON_EXTRACTOR = ./scripts/extract_window_icon.lua
 LUA_MODULE_SRCS = $(sort $(wildcard src/Engine/*.lua))
-ENGINE_ICON_SRC ?= logo.png
+ENGINE_ICON_SRC ?=
 ENGINE_ICON_DEST = .engine/icon.png
-ENGINE_REQUIRED_ASSETS = assets/ascii.png $(ENGINE_ICON_SRC)
+ENGINE_REQUIRED_ASSETS = assets/ascii.png
 PROJECT_ASSETS = $(shell find . -type f \( \
     -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.bmp' \
     -o -name '*.gif' -o -name '*.webp' \
@@ -137,7 +144,7 @@ PROJECT_ASSETS = $(shell find . -type f \( \
     -not -path './dist/*' \
     -not -path './.engine/*' \
     | sort)
-REQUIRED_ASSET_INPUTS = ./assets/ascii.png ./$(ENGINE_ICON_SRC)
+REQUIRED_ASSET_INPUTS = ./assets/ascii.png
 OPTIONAL_ASSETS = $(filter-out $(REQUIRED_ASSET_INPUTS),$(PROJECT_ASSETS))
 ARTIFACT_DIR      ?= $(CURDIR)/dist/release
 CI_ARTIFACT_DIR   ?= $(CURDIR)/dist/ci
@@ -149,6 +156,9 @@ RELEASE_BUNDLE_DIR = $(RELEASE_ROOT)/bundle
 RELEASE_BUNDLE_BIN = $(RELEASE_BUNDLE_DIR)/$(GAME_NAME)
 RELEASE_MANIFEST  = $(ARTIFACT_DIR)/$(BUILD_NAME)-manifest.txt
 RELEASE_CHECKSUMS = $(ARTIFACT_DIR)/$(BUILD_NAME)-SHA256SUMS.txt
+INSTALL_BINDIR    = $(DESTDIR)$(PREFIX)/bin
+INSTALL_DATADIR   = $(DESTDIR)$(PREFIX)/share/tupi
+INSTALL_ASSETDIR  = $(INSTALL_DATADIR)/assets
 
 DIST_SRCS = $(LOADER_SRC) $(SRCS)
 DIST_OBJS = $(patsubst %.c,$(OBJ_DIR_DIST)/%.o,$(DIST_SRCS))
@@ -203,7 +213,7 @@ WIN_CROSS_DEPS_DNF = mingw64-gcc
 WIN_CROSS_DEPS_PACMAN = mingw-w64-gcc
 WIN_CROSS_DEPS_ZYPPER = cross-x86_64-w64-mingw32-gcc
 
-.PHONY: all menu sdl2 win bundle-linux package-release-linux ci-linux release-linux rodar compilar_rust compilar_rust_win compilar_packer compilar_bootstrapper compilar_bundle_tools shaders \
+.PHONY: all menu sdl2 win bundle-linux package-release-linux ci-linux release-linux rodar compilar_rust compilar_rust_win compilar_packer compilar_bootstrapper compilar_bundle_tools shaders install \
         limpar instalar-deps-linux instalar-deps-win ajuda \
         _build_sdl2 _build_win _clean _deps_linux _deps_win
 
@@ -335,9 +345,23 @@ bundle-linux: compilar_rust compilar_bundle_tools shaders $(DIST_OBJS) main.lua 
 	@# Assets passados com path relativo ao projeto -> packer normaliza para assets/<rel>.
 	@printf "$(CYAN)>  Empacotando bootstrapper + engine + scripts + libs + assets...$(RESET)\n"
 	@LIB_COUNT=$$(find .build/bundle_libs -name '*.so*' -type f 2>/dev/null | wc -l); \
+	BUNDLE_ICON_SRC="$(ENGINE_ICON_SRC)"; \
+	if [ -z "$$BUNDLE_ICON_SRC" ]; then \
+		BUNDLE_ICON_SRC="$$( $(LUAJIT) "$(WINDOW_ICON_EXTRACTOR)" main.lua 2>/dev/null || true )"; \
+	fi; \
+	if [ -n "$$BUNDLE_ICON_SRC" ] && [ ! -f "$$BUNDLE_ICON_SRC" ]; then \
+		printf "$(YELLOW)!  Icone informado em Tupi.janela nao encontrado: $$BUNDLE_ICON_SRC$(RESET)\n"; \
+		BUNDLE_ICON_SRC=""; \
+	fi; \
 	CMD="$(PACKER_BIN) bundle \"$(OUTDIR)/$(GAME_NAME)\" \"$(BOOTSTRAPPER_BIN)\" \"$(BUNDLE_ENGINE_BIN)\" main.lua $(LUA_MODULE_SRCS)"; \
 	[ "$$LIB_COUNT" -gt 0 ] && CMD="$$CMD --libs .build/bundle_libs"; \
-	CMD="$$CMD --assets assets/ascii.png $(ENGINE_ICON_SRC)=$(ENGINE_ICON_DEST)"; \
+	CMD="$$CMD --assets assets/ascii.png"; \
+	if [ -n "$$BUNDLE_ICON_SRC" ]; then \
+		printf "$(DIM)   icone do bundle: $$BUNDLE_ICON_SRC$(RESET)\n"; \
+		CMD="$$CMD $$BUNDLE_ICON_SRC=$(ENGINE_ICON_DEST)"; \
+	else \
+		printf "$(DIM)   icone do bundle: padrao do sistema Linux$(RESET)\n"; \
+	fi; \
 	[ -n "$(OPTIONAL_ASSETS)" ] && CMD="$$CMD $(OPTIONAL_ASSETS)"; \
 	eval $$CMD \
 		&& printf "$(GREEN)+  Bundle unico gerado OK.$(RESET)\n" \
@@ -348,6 +372,12 @@ bundle-linux: compilar_rust compilar_bundle_tools shaders $(DIST_OBJS) main.lua 
 	@printf "$(DIM)   Arquivo unico — copie para onde quiser e execute.\n"
 	@printf "   Na execucao ele extrai engine/libs/assets em /tmp e reinicia internamente.\n"
 	@printf "   O bootstrapper nao depende de libzip no startup, melhorando a portabilidade.$(RESET)\n\n"
+
+tupi: compilar_rust shaders $(DIST_OBJS)
+	@printf "$(CYAN)>  Linkando $(BOLD)$(TUPI_BIN)$(RESET)$(CYAN)...$(RESET)\n"
+	@$(CC) -o "$(TUPI_BIN)" $(DIST_OBJS) $(DIST_LIBS) \
+		&& printf "$(GREEN)+  Binario OK.$(RESET)\n" \
+		|| { printf "$(RED)x  Falha no link do binario $(TUPI_BIN).$(RESET)\n\n"; exit 1; }
 
 ci-linux:
 	@$(MAKE) package-release-linux \
@@ -417,9 +447,26 @@ rodar: sdl2
 	@printf "$(GREEN)>  Iniciando LuaJIT...$(RESET)\n\n"
 	@DISPLAY=:0 GDK_BACKEND=x11 $(LUAJIT) main.lua
 
+install: tupi compilar_packer
+	@printf "$(CYAN)>  Instalando TupiEngine em $(DESTDIR)$(PREFIX)...$(RESET)\n"
+	@$(INSTALL) -d "$(INSTALL_BINDIR)" "$(INSTALL_DATADIR)" "$(INSTALL_ASSETDIR)"
+	@$(INSTALL) -Dm755 "$(TUPI_BIN)" "$(INSTALL_BINDIR)/tupi"
+	@for src in $(PROJECT_ASSETS); do \
+		rel="$${src#./}"; \
+		case "$$rel" in \
+			assets/*) dest_rel="$${rel#assets/}" ;; \
+			*) dest_rel="$$rel" ;; \
+		esac; \
+		$(INSTALL) -Dm644 "$$src" "$(INSTALL_ASSETDIR)/$$dest_rel"; \
+	done
+	@$(PACKER_BIN) archive "$(INSTALL_DATADIR)/$(SCRIPT_ARCHIVE_NAME)" main.lua $(LUA_MODULE_SRCS)
+	@printf "$(GREEN)+  Instalado: $(INSTALL_BINDIR)/tupi$(RESET)\n"
+	@printf "$(DIM)   Scripts: $(INSTALL_DATADIR)/$(SCRIPT_ARCHIVE_NAME)\n"
+	@printf "   Assets:  $(INSTALL_ASSETDIR)$(RESET)\n\n"
+
 limpar:
 	@printf "\n$(RED)  Limpando artefatos...$(RESET)\n"
-	@rm -rf .build dist $(SDL2_LIB) $(WIN_LIB) $(DIST_BIN_LINUX) $(SHADERS_SPV) $(SHADERS_EMBED)
+	@rm -rf .build dist $(SDL2_LIB) $(WIN_LIB) $(DIST_BIN_LINUX) $(TUPI_BIN) $(SHADERS_SPV) $(SHADERS_EMBED)
 	@rm -rf .build/bundle_libs
 	@cd $(RUST_DIR) && $(CARGO) clean
 	@printf "$(GREEN)+  Tudo limpo.$(RESET)\n\n"
@@ -430,6 +477,7 @@ ajuda:
 	@printf "  $(GREEN)make sdl2$(RESET)             Compila $(SDL2_LIB) (Linux)\n"
 	@printf "  $(CYAN)make win$(RESET)               Compila $(WIN_LIB) (Windows)\n"
 	@printf "  $(GREEN)make rodar$(RESET)            Compila e executa no Linux\n"
+	@printf "  $(GREEN)make install$(RESET)          Instala em PREFIX/DESTDIR (ex: Flatpak)\n"
 	@printf "  $(YELLOW)make bundle-linux$(RESET)    Arquivo unico portatil (ZIP-append, como Godot)\n"
 	@printf "  $(YELLOW)make ci-linux$(RESET)        Gera artefato Linux de CI\n"
 	@printf "  $(YELLOW)make release-linux$(RESET)   Gera bundle final para release\n"

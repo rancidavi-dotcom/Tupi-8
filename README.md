@@ -133,11 +133,16 @@ O projeto possui CI/CD para gerar artefatos Linux em **Ubuntu 22.04**. Isso ajud
 O bundle Linux exige alguns arquivos essenciais da engine durante o build:
 
 - `assets/ascii.png`
-- `logo.png` por padrão, usado como ícone da janela
 
-Se algum deles estiver ausente, o `Makefile` falha cedo com uma mensagem clara. Isso evita gerar um executável que abre sem fonte padrão ou sem ícone.
+Se ele estiver ausente, o `Makefile` falha cedo com uma mensagem clara. Isso evita gerar um executável que abre sem fonte padrão.
 
-Se você quiser usar outro ícone:
+### Ícone no Linux
+
+Se `main.lua` chamar `Tupi.janela(..., "caminho/do/icone.png")`, o `bundle-linux` reaproveita essa mesma imagem como ícone do app no Linux.
+
+Se o sexto argumento não existir, ou se o arquivo não for encontrado, o bundle não força nenhum ícone e o sistema Linux usa o padrão dele.
+
+Se você quiser sobrescrever isso manualmente no build:
 
 ```bash
 make bundle-linux GAME_NAME=MeuJogo ENGINE_ICON_SRC=.engine/icon.png
