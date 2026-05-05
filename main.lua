@@ -1,6 +1,6 @@
 local Tupi = require("src.Engine.sintaxe")
 -- Inicializa a janela com as dimensões de GameBoy (160x144)
-Tupi.janela(160, 144, "Meu Jogo", 5.0, false, "assets/ascii.png")
+Tupi.janela(160, 144, "Meu Jogo", 5.0, false)
 
 local tela_cheia = false
 local player = {x=10, y= 10, espelhado = false, direcao = "esquerda", andado = false}
@@ -49,7 +49,7 @@ function _rodar()
     elseif player.andado == false then 
         Tupi.pararAnim(anim_esq, player, 0, 1)
     end
-    local len = math.sqrt(2)
+    local len = math.sqrt(dx * dx + dy * dy)
     if len > 0 then
         dx = dx / len
         dy = dy / len
