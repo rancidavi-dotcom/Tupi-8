@@ -1,3 +1,4 @@
+Canal do YouTube da Bitmap: https://www.youtube.com/@bitmap_exe
 <div align="center">
   <img src="./logo.png" alt="Logo da Tupi Engine" width="180">
 
