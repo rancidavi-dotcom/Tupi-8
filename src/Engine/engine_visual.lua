@@ -3,6 +3,16 @@ local C   = require("src.Engine.engineffi")
 
 local Visual = {}
 
+-- ─── FPS ─────────────────────────────────────────────────────────────────────
+
+function Visual.fpsLimite(n)
+    C.tupi_fps_limite(n or 60)
+end
+
+function Visual.fpsAtual()
+    return tonumber(C.tupi_fps_atual())
+end
+
 -- ─── SPRITE ──────────────────────────────────────────────────────────────────
 local Sprite = {}
 
@@ -92,7 +102,6 @@ Sprite._espelhos         = _espelhos
 Sprite._chaveEspelho     = _chaveEspelho
 
 function Sprite.desenharObjeto(w)
-    if w._destruido then return end
     _enviarComEspelho(w, w.z or 0); C.tupi_batch_desenhar()
 end
 
@@ -112,7 +121,6 @@ function Sprite.enviarBatch(w, z)
 end
 
 function Sprite.desenhar(w, z)
-    if w._destruido then return end
     _enviarComEspelho(w, z or w.z or 0); C.tupi_batch_desenhar()
 end
 

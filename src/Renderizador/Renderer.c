@@ -69,6 +69,9 @@ static int    _fps_limite  = 0;
 static float  _fps_atual   = 0.0f;
 static Uint64 _tick_frame  = 0;
 
+static TupiMatriz _proj_cache    = {{0}};
+static int        _proj_cache_ok = 0;
+
 // Delta máximo permitido (s). Evita teleporte do player em spikes de CPU,
 // perda de foco da janela ou frames muito longos.
 // Equivale a "no mínimo 15 FPS efetivos" para física e movimento.
@@ -100,29 +103,29 @@ float tupi_fps_atual(void) {
 }
 
 static void _fps_frame_inicio(void) {
-    _tick_frame = SDL_GetPerformanceCounter();
+    if (_tick_frame == 0)
+        _tick_frame = SDL_GetPerformanceCounter();
 }
 
 static void _fps_frame_fim(void) {
     if (_fps_limite > 0) {
         double alvo_seg = 1.0 / (double)_fps_limite;
+        Uint64 tick_alvo = _tick_frame + (Uint64)(alvo_seg * (double)_perf_freq);
 
-        // Fase 1: SDL_Delay grosso — deixa 2ms de margem para o busy-wait
-        double gasto = (double)(SDL_GetPerformanceCounter() - _tick_frame) / (double)_perf_freq;
-        double dormir = alvo_seg - gasto - 0.002;
-        if (dormir > 0.001)
-            SDL_Delay((Uint32)(dormir * 1000.0));
-
-        // Fase 2: busy-wait preciso até bater o alvo exato
-        while ((double)(SDL_GetPerformanceCounter() - _tick_frame) / (double)_perf_freq < alvo_seg)
-            ; // spin
+        Uint64 agora_sleep = SDL_GetPerformanceCounter();
+        if (agora_sleep < tick_alvo) {
+            Uint64 falta = tick_alvo - agora_sleep;
+            Uint32 ms = (Uint32)(falta * 1000ull / _perf_freq);
+            if (ms > 1) SDL_Delay(ms - 1);
+        }
+        while (SDL_GetPerformanceCounter() < tick_alvo) {}
     }
 
-    // Mede FPS real APÓS o sleep, refletindo a taxa efetiva de frames
     Uint64 agora = SDL_GetPerformanceCounter();
     double frame_seg = (double)(agora - _tick_frame) / (double)_perf_freq;
     float fps_medido = (frame_seg > 0.0) ? (float)(1.0 / frame_seg) : 9999.0f;
     _fps_atual = _fps_atual * 0.9f + fps_medido * 0.1f;
+    _tick_frame = agora;
 }
 
 // --- Vulkan ---
@@ -133,8 +136,8 @@ static void _fps_frame_fim(void) {
 #define TUPI_INITIAL_INDEX_CAPACITY 12288u
 #define TUPI_MAX_TEXTURES 4096u
 #define TUPI_MAX_PENDING_UPLOADS 256u
-#define TUPI_MAX_TEXTURE_PAGES 64u
-#define TUPI_TEXTURE_PAGE_SIZE (64u * 1024u * 1024u)
+#define TUPI_TEXTURE_PAGE_SIZE (16u * 1024u * 1024u)
+#define TUPI_MAX_TEXTURE_PAGES 16u
 #define TUPI_MAX_CIRCLE_LUTS 64u
 
 typedef struct {
@@ -265,7 +268,7 @@ typedef struct {
     TupiTextureVulkan* texturas;
     uint32_t           texturas_cap;
     uint32_t           textura_branca_id;
-    uint32_t  textura_freelist[TUPI_MAX_TEXTURES];
+    uint32_t textura_freelist[TUPI_MAX_TEXTURES];
     uint32_t  textura_freelist_topo;
     TupiTexturePage    texture_pages[TUPI_MAX_TEXTURE_PAGES];
     TupiCircleLUT      circle_luts[TUPI_MAX_CIRCLE_LUTS];
@@ -304,9 +307,30 @@ static uint32_t _clamp_u32(uint32_t v, uint32_t min_v) {
 }
 
 static void _vk_reset_frame_cpu(void) {
-    _vk.frame_vertex_count = 0;
-    _vk.frame_index_count = 0;
-    _vk.frame_packet_count = 0;
+    uint32_t ultimo_vertex_count = _vk.frame_vertex_count;
+    uint32_t ultimo_index_count  = _vk.frame_index_count;
+
+    _vk.frame_vertex_count  = 0;
+    _vk.frame_index_count   = 0;
+    _vk.frame_packet_count  = 0;
+
+    // Encolhe buffer de vértices se ficou grande demais
+    if (_vk.frame_vertex_capacity > TUPI_INITIAL_VERTEX_CAPACITY * 2 &&
+        ultimo_vertex_count < _vk.frame_vertex_capacity / 4) {
+        uint32_t novo = _vk.frame_vertex_capacity / 2;
+        if (novo < TUPI_INITIAL_VERTEX_CAPACITY) novo = TUPI_INITIAL_VERTEX_CAPACITY;
+        TupiGPUVertice* tmp = realloc(_vk.frame_vertices, novo * sizeof(TupiGPUVertice));
+        if (tmp) { _vk.frame_vertices = tmp; _vk.frame_vertex_capacity = novo; }
+    }
+
+    // Encolhe buffer de índices (estava completamente ausente)
+    if (_vk.frame_index_capacity > TUPI_INITIAL_INDEX_CAPACITY * 2 &&
+        ultimo_index_count < _vk.frame_index_capacity / 4) {
+        uint32_t novo = _vk.frame_index_capacity / 2;
+        if (novo < TUPI_INITIAL_INDEX_CAPACITY) novo = TUPI_INITIAL_INDEX_CAPACITY;
+        TupiGPUIndice* tmp = realloc(_vk.frame_indices, novo * sizeof(TupiGPUIndice));
+        if (tmp) { _vk.frame_indices = tmp; _vk.frame_index_capacity = novo; }
+    }
 }
 
 static void _vk_destroy_buffer(VkBuffer* buffer, VkDeviceMemory* memory) {
@@ -439,6 +463,8 @@ static void _configurar_projecao(int largura, int altura) {
         TupiMatriz proj = tupi_projecao_ortografica(_logico_w, _logico_h);
         tupi_sprite_set_viewport(_logico_w, _logico_h);
         tupi_sprite_set_projecao(proj.m);
+        _proj_cache    = proj;
+        _proj_cache_ok = 1;
     }
 }
 
@@ -806,20 +832,40 @@ static void _vk_destroy_texture_slot(uint32_t idx) {
         vkDestroyImage(_vk.device, tex->image, NULL);
         tex->image = VK_NULL_HANDLE;
     }
+
+    // Libera a página de memória se ficou vazia
     if (!tex->memoria_paginada && tex->memory != VK_NULL_HANDLE) {
         vkFreeMemory(_vk.device, tex->memory, NULL);
         tex->memory = VK_NULL_HANDLE;
     }
 
-    tex->memory = VK_NULL_HANDLE;
-    tex->largura = 0;
-    tex->altura = 0;
-    tex->memoria_offset = 0;
-    tex->pagina_memoria = 0;
-    tex->memoria_paginada = 0;
-    tex->ativo = 0;
+    uint32_t pg = tex->pagina_memoria;
+    int era_paginada = tex->memoria_paginada;
 
-    // devolve o slot para reuso O(1)
+    tex->memory          = VK_NULL_HANDLE;
+    tex->largura         = 0;
+    tex->altura          = 0;
+    tex->memoria_offset  = 0;
+    tex->pagina_memoria  = 0;
+    tex->memoria_paginada = 0;
+    tex->ativo           = 0;
+
+    if (era_paginada && pg < TUPI_MAX_TEXTURE_PAGES && _vk.texture_pages[pg].ativo) {
+        int alguma_ativa = 0;
+        for (uint32_t i = 0; i < _vk.texturas_cap; i++) {
+            if (_vk.texturas[i].ativo &&
+                _vk.texturas[i].memoria_paginada &&
+                _vk.texturas[i].pagina_memoria == pg) {
+                alguma_ativa = 1;
+                break;
+            }
+        }
+        if (!alguma_ativa) {
+            vkFreeMemory(_vk.device, _vk.texture_pages[pg].memory, NULL);
+            _vk.texture_pages[pg] = (TupiTexturePage){0};
+        }
+    }
+
     if (_vk.textura_freelist_topo < TUPI_MAX_TEXTURES)
         _vk.textura_freelist[_vk.textura_freelist_topo++] = idx;
 }
@@ -881,7 +927,8 @@ static int _vk_criar_textura_rgba8_interna(
     uint32_t largura,
     uint32_t altura,
     uint32_t* out_id)
-{
+{   
+    _vk_coletar_uploads_pendentes();
     if (!pixels || largura == 0 || altura == 0) return 0;
 
     VkDeviceSize tamanho = (VkDeviceSize)largura * (VkDeviceSize)altura * 4u;
@@ -2054,7 +2101,9 @@ static int _vk_record_command_buffer(VkCommandBuffer cmd, uint32_t image_index) 
         );
     }
 
-    TupiMatriz proj = tupi_projecao_ortografica(_logico_w, _logico_h);
+    TupiMatriz proj = _proj_cache_ok
+    ? _proj_cache
+    : tupi_projecao_ortografica(_logico_w, _logico_h);
     TupiPushConstantes push = {0};
     memcpy(push.proj, proj.m, sizeof(push.proj));
     push.proj[5]  = -push.proj[5];
@@ -2369,10 +2418,12 @@ void tupi_renderer_desenhar_quad(unsigned int textura_id, const float* quad, con
 
 static void _carregar_icone(const char* caminho) {
     const char* alvo = (caminho && caminho[0]) ? caminho : NULL;
+    if (!alvo || !_janela) {
+        return;
+    }
 
     TupiImagemRust* img = tupi_imagem_carregar_seguro(alvo);
     if (!img) {
-        fprintf(stderr, "[Renderer] Icone nao encontrado: '%s'\n", alvo);
         return;
     }
 
@@ -2390,6 +2441,10 @@ static void _carregar_icone(const char* caminho) {
     }
 
     tupi_imagem_destruir(img);
+}
+
+void tupi_janela_aplicar_icone(const char* icone) {
+    _carregar_icone(icone);
 }
 
 // --- Criação da janela ---

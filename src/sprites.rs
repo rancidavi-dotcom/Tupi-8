@@ -260,6 +260,9 @@ impl TupiBatch {
 
     fn limpar(&mut self) {
         self.itens.clear();
+        if self.itens.capacity() > 512 * 4 {
+            self.itens.shrink_to(512);
+        }
     }
 }
 

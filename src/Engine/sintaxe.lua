@@ -1192,30 +1192,121 @@ local function _garantirFontePadrao()
     return false
 end
 
+-- ─── SISTEMA DE DEFAULTS ─────────────────────────────────────────────────────
+-- Configurações aplicadas automaticamente para facilitar o uso por iniciantes.
+-- Se o usuário chamar qualquer uma dessas funções dentro de _iniciar(),
+-- o default correspondente é ignorado e prevalece o valor escolhido pelo usuário.
+--
+-- Para adicionar um novo default basta:
+--   1. Envolver a função desejada com _rastrear() abaixo.
+--   2. Adicionar a entrada na tabela _DEFAULTS com o valor padrão.
+--   3. Chamar _aplicarDefault() em _aplicarDefaults() com o nome e a função.
+
+local _cfg = {}  -- registra quais opções o usuário configurou explicitamente
+
+-- Envolve uma função Tupi para rastrear chamadas do usuário
+local function _rastrear(chave, fn)
+    return function(...)
+        _cfg[chave] = true
+        return fn(...)
+    end
+end
+
+-- ── Rastreamento: fpsLimite ───────────────────────────────────────────────────
+local _fpsLimite_orig     = Tupi.fpsLimite
+Tupi.fpsLimite            = _rastrear("fpsLimite",    _fpsLimite_orig)
+
+-- ── Rastreamento: pixelSnap ───────────────────────────────────────────────────
+local _pixelSnap_orig     = Tupi.pixelSnap
+Tupi.pixelSnap            = _rastrear("pixelSnap",    _pixelSnap_orig)
+
+-- ── Rastreamento: pixelPerfeito ───────────────────────────────────────────────
+local _pixelPerfeito_orig = Tupi.pixelPerfeito
+Tupi.pixelPerfeito        = _rastrear("pixelPerfeito", _pixelPerfeito_orig)
+
+-- ── Rastreamento: corFundo ────────────────────────────────────────────────────
+local _corFundo_orig      = Tupi.corFundo
+Tupi.corFundo             = _rastrear("corFundo",     _corFundo_orig)
+
+-- ── Rastreamento: cls (também altera cor de fundo) ───────────────────────────
+-- cls é definida depois, mas marca _cfg.corFundo = true diretamente no corpo da função.
+
+-- ── Valores padrão do engine ──────────────────────────────────────────────────
+local _DEFAULTS = {
+    -- Limite de FPS: 60 é um bom equilíbrio entre fluidez e consumo
+    fpsLimite    = 60,
+    -- Pixel snap desligado: movimento suave por padrão
+    pixelSnap    = false,
+    -- Pixel perfeito (câmera) desligado junto com pixelSnap
+    pixelPerfeito = false,
+}
+
+-- Aplica um default apenas se o usuário não configurou a opção
+local function _aplicarDefault(chave, fn, valor)
+    if not _cfg[chave] then fn(valor) end
+end
+
+-- Chamado uma vez, logo após _iniciar(), antes do loop principal
+local function _aplicarDefaults()
+    _aplicarDefault("fpsLimite",    _fpsLimite_orig,     _DEFAULTS.fpsLimite)
+    _aplicarDefault("pixelSnap",    _pixelSnap_orig,     _DEFAULTS.pixelSnap)
+    -- pixelPerfeito só aplica se o usuário não mexeu em pixelSnap nem em pixelPerfeito
+    if not _cfg.pixelSnap and not _cfg.pixelPerfeito then
+        _pixelPerfeito_orig(_DEFAULTS.pixelPerfeito)
+    end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- inicia o loop principal: chama _iniciar(), depois _rodar() e _desenhar() a cada frame
 function Tupi.rodar()
     _injetarGlobais()
     _garantirFontePadrao()
-    if type(_G._iniciar)=="function" then _G._iniciar() end
+    if type(_G._iniciar) == "function" then _G._iniciar() end
+    _aplicarDefaults()
+
+    -- controle de limpeza de campos de teclado inativos
+    local _kb_uso        = {}
+    local _kb_limpar_cnt = 0
+
+    local _registrarCampo_orig = _registrarCampo
+    _registrarCampo = function(chave)
+        _kb_uso[chave] = _kb.frameNum
+        _registrarCampo_orig(chave)
+    end
+
     while J.rodando() do
         J.limpar()
-        _kb.frameNum=_kb.frameNum+1
-        if type(_G._rodar)=="function"    then _G._rodar()    end
+        _kb.frameNum = _kb.frameNum + 1
+
+        -- limpa estados de teclado não usados há mais de 300 frames
+        _kb_limpar_cnt = _kb_limpar_cnt + 1
+        if _kb_limpar_cnt >= 300 then
+            _kb_limpar_cnt = 0
+            for k in pairs(_kb.inputs) do
+                if (_kb.frameNum - (_kb_uso[k] or 0)) > 300 then
+                    _kb.inputs[k] = nil
+                    _kb_uso[k]    = nil
+                end
+            end
+        end
+
+        if type(_G._rodar)    == "function" then _G._rodar()    end
         _atualizarFadeMapa()
-        if type(_G._desenhar)=="function" then _G._desenhar() end
+        if type(_G._desenhar) == "function" then _G._desenhar() end
         _desenharFadeMapa()
         R.batchDesenhar()
         J.atualizar()
     end
     J.fechar()
 end
-
 -- ─── ALIASES NO MÓDULO ───────────────────────────────────────────────────────
 
 Tupi.apresentar=Tupi.atualizar
 
 -- cls(cor): aceita índice de paleta 0-15, tabela {r,g,b} ou r,g,b separados
 function Tupi.cls(cor, g, b)
+    _cfg.corFundo = true  -- usuário definiu cor de fundo manualmente
     if type(cor) == "number" and g == nil then
         local p = Tupi.PALETA[cor]
         if p then R.corFundo(p[1], p[2], p[3]); return end
@@ -1234,7 +1325,7 @@ Tupi.set_pos=Tupi.posicionar;    Tupi.get_pos=Tupi.posicao
 Tupi.alpha=Tupi.alfa;            Tupi.destroy=Tupi.destruir
 Tupi.overlap=Tupi.colidiu;       Tupi.new_anim=Tupi.criarAnim
 Tupi.anim_done=Tupi.animTerminou; Tupi.time=Tupi.tempo
-Tupi.set_fps=Tupi.fpsLimite;     Tupi.get_fps=Tupi.fpsAtual
+Tupi.set_fps=Tupi.fpsLimite;     Tupi.get_fps=Tupi.fpsAtual  -- set_fps usa versão rastreada
 Tupi.rad=Tupi.radianos;          Tupi.deg=Tupi.graus
 Tupi.dist=Tupi.distancia;        Tupi.btn=Tupi.botao
 Tupi.btnp=Tupi.pressionou;       Tupi.btnr=Tupi.soltou

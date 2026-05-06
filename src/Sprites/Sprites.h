@@ -32,6 +32,8 @@ void tupi_sprite_iniciar(void);
 void tupi_sprite_encerrar(void);
 void tupi_sprite_set_projecao(const float* mat4);
 void tupi_sprite_set_viewport(int largura, int altura);
+void tupi_sprite_pixel_snap(int ativo);
+int  tupi_sprite_pixel_snap_ativo(void);
 
 // Tint do batch — multiplica sobre a textura. Reset = branco (sem tint).
 void tupi_sprite_set_cor(float r, float g, float b, float a);

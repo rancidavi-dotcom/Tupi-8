@@ -154,20 +154,47 @@ Core.input = Input
 -- ─── COLISÃO ─────────────────────────────────────────────────────────────────
 local Colisao = {}
 
-local function _ret(t) return ffi.new("TupiRetCol",  t.x, t.y, t.largura, t.altura) end
-local function _cir(t) return ffi.new("TupiCircCol", t.x, t.y, t.raio)              end
--- Converte resultado C para tabela Lua
+-- caches estáticos — evita ffi.new() a cada frame
+local _ret_a = ffi.new("TupiRetCol")
+local _ret_b = ffi.new("TupiRetCol")
+local _cir_a = ffi.new("TupiCircCol")
+local _cir_b = ffi.new("TupiCircCol")
+local _col_tmp = ffi.new("TupiColisao")
+
+local function _ret(t, dst)
+    dst.x = t.x; dst.y = t.y
+    dst.largura = t.largura; dst.altura = t.altura
+    return dst
+end
+local function _cir(t, dst)
+    dst.x = t.x; dst.y = t.y; dst.raio = t.raio
+    return dst
+end
 local function _info(c)
     return { colidindo = c.colidindo == 1, dx = tonumber(c.dx), dy = tonumber(c.dy) }
 end
 
-function Colisao.retRet(a, b)        return C.tupi_ret_ret(_ret(a), _ret(b)) == 1            end
-function Colisao.retRetInfo(a, b)    return _info(C.tupi_ret_ret_info(_ret(a), _ret(b)))      end
-function Colisao.cirCir(a, b)        return C.tupi_cir_cir(_cir(a), _cir(b)) == 1            end
-function Colisao.cirCirInfo(a, b)    return _info(C.tupi_cir_cir_info(_cir(a), _cir(b)))      end
-function Colisao.retCir(r, c)        return C.tupi_ret_cir(_ret(r), _cir(c)) == 1            end
-function Colisao.pontoRet(px, py, r) return C.tupi_ponto_ret(px, py, _ret(r)) == 1           end
-function Colisao.pontoCir(px, py, c) return C.tupi_ponto_cir(px, py, _cir(c)) == 1           end
+function Colisao.retRet(a, b)
+    return C.tupi_ret_ret(_ret(a, _ret_a), _ret(b, _ret_b)) == 1
+end
+function Colisao.retRetInfo(a, b)
+    return _info(C.tupi_ret_ret_info(_ret(a, _ret_a), _ret(b, _ret_b)))
+end
+function Colisao.cirCir(a, b)
+    return C.tupi_cir_cir(_cir(a, _cir_a), _cir(b, _cir_b)) == 1
+end
+function Colisao.cirCirInfo(a, b)
+    return _info(C.tupi_cir_cir_info(_cir(a, _cir_a), _cir(b, _cir_b)))
+end
+function Colisao.retCir(r, c)
+    return C.tupi_ret_cir(_ret(r, _ret_a), _cir(c, _cir_a)) == 1
+end
+function Colisao.pontoRet(px, py, r)
+    return C.tupi_ponto_ret(px, py, _ret(r, _ret_a)) == 1
+end
+function Colisao.pontoCir(px, py, c)
+    return C.tupi_ponto_cir(px, py, _cir(c, _cir_a)) == 1
+end
 
 function Colisao.mouseNoRet(r)
     local mx, my = Colisao._getMouse and Colisao._getMouse() or 0, 0
@@ -183,7 +210,6 @@ Core.colisao = Colisao
 -- ─── FÍSICA ──────────────────────────────────────────────────────────────────
 local Fisica = {}
 
--- Corpo dinâmico com massa, elasticidade e atrito
 function Fisica.corpo(x, y, massa, elasticidade, atrito)
     local c = ffi.new("TupiCorpo[1]")
     c[0].x = x or 0; c[0].y = y or 0
@@ -195,7 +221,6 @@ function Fisica.corpo(x, y, massa, elasticidade, atrito)
     return c
 end
 
--- Corpo imóvel (massa=0)
 function Fisica.corpoEstatico(x, y)
     local c = ffi.new("TupiCorpo[1]")
     c[0].x = x or 0; c[0].y = y or 0
@@ -210,18 +235,25 @@ function Fisica.atualizar(corpo, gravidade)
     C.tupi_fisica_atualizar(corpo, dt, gravidade or 500.0)
 end
 
-function Fisica.impulso(corpo, fx, fy)    C.tupi_fisica_impulso(corpo, fx or 0, fy or 0) end
+function Fisica.impulso(corpo, fx, fy)
+    C.tupi_fisica_impulso(corpo, fx or 0, fy or 0)
+end
 function Fisica.atrito(corpo)
     local dt = Fisica._getDt and Fisica._getDt() or 0
     C.tupi_aplicar_atrito(corpo, dt)
 end
-function Fisica.limitarVel(corpo, maxVel) C.tupi_limitar_velocidade(corpo, maxVel or 800.0) end
+function Fisica.limitarVel(corpo, maxVel)
+    C.tupi_limitar_velocidade(corpo, maxVel or 800.0)
+end
 function Fisica.pos(corpo)  return tonumber(corpo[0].x),    tonumber(corpo[0].y)    end
 function Fisica.vel(corpo)  return tonumber(corpo[0].velX), tonumber(corpo[0].velY) end
-function Fisica.setPosicao(corpo, x, y) corpo[0].x = x or corpo[0].x; corpo[0].y = y or corpo[0].y end
-function Fisica.setVel(corpo, vx, vy)  corpo[0].velX = vx or 0; corpo[0].velY = vy or 0 end
+function Fisica.setPosicao(corpo, x, y)
+    corpo[0].x = x or corpo[0].x; corpo[0].y = y or corpo[0].y
+end
+function Fisica.setVel(corpo, vx, vy)
+    corpo[0].velX = vx or 0; corpo[0].velY = vy or 0
+end
 
--- Hitbox a partir da posição do corpo
 function Fisica.retCol(corpo, largura, altura)
     local r = C.tupi_corpo_ret(corpo, largura or 0, altura or 0)
     return { x=tonumber(r.x), y=tonumber(r.y), largura=tonumber(r.largura), altura=tonumber(r.altura) }
@@ -231,15 +263,19 @@ function Fisica.cirCol(corpo, raio)
     return { x=tonumber(c.x), y=tonumber(c.y), raio=tonumber(c.raio) }
 end
 
--- Resolve colisão entre dois dinâmicos ou entre corpo e estático
 function Fisica.resolverColisao(a, b, info)
-    C.tupi_resolver_colisao(a, b, ffi.new("TupiColisao", info.colidindo and 1 or 0, info.dx or 0, info.dy or 0))
+    _col_tmp.colidindo = info.colidindo and 1 or 0
+    _col_tmp.dx = info.dx or 0
+    _col_tmp.dy = info.dy or 0
+    C.tupi_resolver_colisao(a, b, _col_tmp)
 end
 function Fisica.resolverEstatico(corpo, info)
-    C.tupi_resolver_estatico(corpo, ffi.new("TupiColisao", info.colidindo and 1 or 0, info.dx or 0, info.dy or 0))
+    _col_tmp.colidindo = info.colidindo and 1 or 0
+    _col_tmp.dx = info.dx or 0
+    _col_tmp.dy = info.dy or 0
+    C.tupi_resolver_estatico(corpo, _col_tmp)
 end
 
--- Copia posição do corpo para o sprite wrapper
 function Fisica.sincronizar(wrapper, corpo)
     wrapper.obj[0].x = corpo[0].x
     wrapper.obj[0].y = corpo[0].y

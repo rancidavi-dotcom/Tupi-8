@@ -61,6 +61,7 @@ TupiMatriz tupi_mat4_multiplicar(const TupiMatriz* a, const TupiMatriz* b);
 // --- Janela ---
 
 int  tupi_janela_criar(int largura, int altura, const char* titulo, float escala, int sem_borda, const char* icone);
+void tupi_janela_aplicar_icone(const char* icone);
 
 void tupi_janela_set_titulo(const char* titulo);
 void tupi_janela_set_decoracao(int ativo);
