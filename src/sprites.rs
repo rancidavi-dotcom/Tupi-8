@@ -78,6 +78,8 @@ pub extern "C" fn tupi_imagem_carregar_seguro(caminho: *const c_char) -> *mut Tu
     let largura  = rgba.width()  as c_int;
     let altura   = rgba.height() as c_int;
     let tamanho  = largura * altura * 4;
+    // Warning linha 80. Como largura e altura são c_int, isso pode dar overflow de a imagem for muito grande.
+    //Melhor fazer com usize e validar antes de converter para c_int
 
     let mut pixels_vec = rgba.into_raw();
     pixels_vec.shrink_to_fit();
